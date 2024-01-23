@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script type="module">
+        // HELPERS
+        import { create } from 'https://cdn.jsdelivr.net/npm/gc-hook/es.js';
+
+        // used to avoid creating proxies when needed
+        const noWrap = new Set;
+        const direct = value => {
+            // it's cleared after args are passed along
+            noWrap.add(value);
+            return value;
+        };
+
+        // pass along arguments avoiding wraps when explicitly needed
+        const args = (...values) => {
+            values = values.map(gc);
+            // clear noWrap for next invoke
+            noWrap.clear();
+            return values;
+        };
+
+        // helps avoiding creation of multiple proxies per same value
+        // without holding the proxy itself within the WeakMap
+        // @type {WeakMap<T, WeakRef<ProxyHandler<T>>>}
+        const proxies = new WeakMap;
+
+        // invoked when the Proxy(value) is not referenced anymore
+        const onGC = value => {
+            proxies.delete(value);
+            console.log('freed', value);
+            // here we can ...
+            // value.destroy()
+            // free(value)
+            // ... or whatever
+        };
+
+        // just a placeholder example of what Pyodide / MicroPython could do
+        const create_proxy = value => new Proxy(value, {});
+
+        const gc = value => {
+            switch (typeof value) {
+                case 'object':
+                    if (value === null) break;
+                case 'function':
+                    // avoid creating wraps when needed
+                    if (noWrap.has(value)) break;
+                    // return a proxy or anything else that makes sense so that
+                    // such Proxy is the one eventually retained into memory ...
+                    // once that proxy is not referenced anymore, value can be freed
+
+                    // if the value is known, its proxy is likely still around
+                    let proxy = proxies.get(value)?.deref();
+                    if (proxy) return proxy;
+
+                    // in other cases create it once and weak-store it
+                    proxy = create_proxy(value);
+                    proxies.set(value, new WeakRef(proxy));
+                    // hold on value and return the proxy reference instead
+                    return create(value, onGC, { return: proxy });
+            }
+            return value;
+        };
+
+        // USER CODE - Use Safari / WebKit Collect Garbage on click
+        let div = document.querySelector('div');
+
+        // single case for right hand assignments
+        div.onclick = gc(({ type }) => {
+            console.log(type);
+        });
+
+        // any JS proxied function arguments list/invoke
+        div.addEventListener(...args(
+            'click',
+            ({ currentTarget }) => {
+                currentTarget.remove();
+            },
+
+            // noWrap example: this is never observed / proxied
+            direct({ once: true })
+        ));
+
+        // drop this reference for GC example sake
+        // apaprently this is needed in WebKit only for some reason
+        // otherwise onclick = ... doesn't get freed, only the listener
+        div = null;
+
+    </script>
+</head>
+<body>
+    <div>live</div>
+</body>
+</html>
