@@ -26,6 +26,32 @@ export const message = ({ data: [action, id] }) => {
                 // the original `ref` can be a PyProxy or a pointer.
                 let proxy = create(ref, onGC);
 
+                // ... I am going to try the cycle on DOM here ...
+                if (world === 'main') {
+                    let live = document.querySelector('div');
+                    if (!live.ref) {
+                        // this won't cause any issue
+                        live.ref = proxy;
+
+                        // this would cause a cycle ... BUT ...
+                        // the proxy here is not what real proxies do
+                        // real proxies would instead create the cross reference
+                        // for just an identifier in the other world (worker)
+                        // so this breaks this demo but I am not sure it would break
+                        // the real-world use case because when live is collected
+                        // this reference *should* be freed or non existent!
+                        // proxy.live = live;
+
+                        // in order to better simulate what happens for real
+                        // let's try this instead
+                        proxy.live = new WeakRef(live);
+                        // so now it frees (after a while) without issues
+
+                        // simulating DOM trashing in 2 seconds
+                        setTimeout(() => live.remove(), 2000);
+                    }
+                }
+
                 // how to attach a cycle to `proxy` before this happens?
                 setTimeout(() => {
                     proxy = null;
